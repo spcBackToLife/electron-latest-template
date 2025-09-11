@@ -11,14 +11,23 @@ import renderer from 'vite-plugin-electron-renderer';
 import pkg from './package.json';
 
 // https://vitejs.dev/config/
-export default defineConfig(({ command }) => {
-	rmSync('dist-electron', { recursive: true, force: true });
+export default defineConfig(({ command, mode }) => {
+	// 只在 electron 模式下清理 dist-electron
+	if (mode !== 'web') {
+		rmSync('dist-electron', { recursive: true, force: true });
+	}
 
 	const isServe = command === 'serve';
 	const isBuild = command === 'build';
 	const sourcemap = isServe || !!process.env.VSCODE_DEBUG;
+	const isWebMode = mode === 'web';
 
-	return {
+	const PUBLIC_PATH = process.env.PUBLIC_PATH;
+	const publicPath = isWebMode ? { base: PUBLIC_PATH } : {};
+
+	// 基础配置
+	const baseConfig = {
+		...publicPath,
 		resolve: {
 			alias: {
 				'@': path.join(__dirname, 'src'),
@@ -26,6 +35,7 @@ export default defineConfig(({ command }) => {
 			},
 		},
 		build: {
+			outDir: isWebMode ? 'build' : 'dist',
 			rollupOptions: {
 				plugins: [rollupNodePolyFill()],
 				external: ['electron', 'better-sqlite3'],
@@ -37,99 +47,8 @@ export default defineConfig(({ command }) => {
 				define: {
 					global: 'globalThis',
 				},
-				// Enable esbuild polyfill plugins
-				plugins: [
-					NodeGlobalsPolyfillPlugin({
-						buffer: true,
-						process: true,
-					}),
-					NodeModulesPolyfillPlugin(),
-				],
 			},
 		},
-		plugins: [
-			react({
-				babel: {
-					plugins: [
-						['@babel/plugin-proposal-decorators', { legacy: true }],
-						['@babel/plugin-proposal-class-properties', { loose: true }],
-					],
-				},
-			}),
-			monacoEditorPlugin({
-				languageWorkers: ['typescript', 'html', 'css'],
-			}),
-			NodeGlobalsPolyfillPlugin({
-				buffer: true,
-				process: true,
-			}),
-			electron([
-				{
-					// Main-Process entry file of the Electron App.
-					entry: 'electron/main/index.ts',
-					onstart(options) {
-						if (process.env.VSCODE_DEBUG) {
-							console.log(
-								/* For `.vscode/.debug.script.mjs` */ '[startup] Electron App'
-							);
-						} else {
-							options.startup();
-						}
-					},
-					vite: {
-						resolve: {
-							alias: {
-								'@shared': path.resolve(__dirname, 'shared'),
-							},
-						},
-						build: {
-							sourcemap,
-							minify: isBuild,
-							outDir: 'dist-electron/main',
-							rollupOptions: {
-								external: Object.keys(
-									'dependencies' in pkg ? pkg.dependencies : {}
-								),
-							},
-						},
-					},
-				},
-				{
-					entry: 'electron/preload/index.ts',
-					onstart(options) {
-						// Notify the Renderer-Process to reload the page when the Preload-Scripts build is complete,
-						// instead of restarting the entire Electron App.
-						options.reload();
-					},
-					vite: {
-						resolve: {
-							alias: {
-								'@shared': path.resolve(__dirname, 'shared'),
-							},
-						},
-						build: {
-							sourcemap: sourcemap ? 'inline' : undefined, // #332
-							minify: isBuild,
-							outDir: 'dist-electron/preload',
-							rollupOptions: {
-								external: Object.keys(
-									'dependencies' in pkg ? pkg.dependencies : {}
-								),
-							},
-						},
-					},
-				},
-			]),
-			// Use Node.js API in the Renderer-process
-			renderer(),
-		],
-		// server: process.env.VSCODE_DEBUG && (() => {
-		//   const url = new URL(pkg.debug.env.VITE_DEV_SERVER_URL)
-		//   return {
-		//     host: url.hostname,
-		//     port: +url.port,
-		//   }
-		// })(),
 		server: {
 			port: 3004,
 			proxy: {},
@@ -137,7 +56,95 @@ export default defineConfig(({ command }) => {
 		define: {
 			global: 'globalThis',
 		},
-
 		clearScreen: false,
+	};
+
+	// 基础插件
+	const basePlugins = [
+		react({
+			babel: {
+				plugins: [
+					['@babel/plugin-proposal-decorators', { legacy: true }],
+					['@babel/plugin-proposal-class-properties', { loose: true }],
+				],
+			},
+		}),
+		monacoEditorPlugin({
+			languageWorkers: ['typescript', 'html', 'css'],
+		}),
+		NodeGlobalsPolyfillPlugin({
+			buffer: true,
+			process: true,
+		}),
+		NodeModulesPolyfillPlugin(),
+	];
+
+	// Electron 插件配置
+	const electronPlugins = [
+		electron([
+			{
+				// Main-Process entry file of the Electron App.
+				entry: 'electron/main/index.ts',
+				onstart(options) {
+					if (process.env.VSCODE_DEBUG) {
+						console.log(
+							/* For `.vscode/.debug.script.mjs` */ '[startup] Electron App'
+						);
+					} else {
+						options.startup();
+					}
+				},
+				vite: {
+					resolve: {
+						alias: {
+							'@shared': path.resolve(__dirname, 'shared'),
+						},
+					},
+					build: {
+						sourcemap,
+						minify: isBuild,
+						outDir: 'dist-electron/main',
+						rollupOptions: {
+							external: Object.keys(
+								'dependencies' in pkg ? pkg.dependencies : {}
+							),
+						},
+					},
+				},
+			},
+			{
+				entry: 'electron/preload/index.ts',
+				onstart(options) {
+					// Notify the Renderer-Process to reload the page when the Preload-Scripts build is complete,
+					// instead of restarting the entire Electron App.
+					options.reload();
+				},
+				vite: {
+					resolve: {
+						alias: {
+							'@shared': path.resolve(__dirname, 'shared'),
+						},
+					},
+					build: {
+						sourcemap: sourcemap ? 'inline' : undefined, // #332
+						minify: isBuild,
+						outDir: 'dist-electron/preload',
+						rollupOptions: {
+							external: Object.keys(
+								'dependencies' in pkg ? pkg.dependencies : {}
+							),
+						},
+					},
+				},
+			},
+		]),
+		// Use Node.js API in the Renderer-process
+		renderer(),
+	];
+
+	return {
+		...baseConfig,
+
+		plugins: isWebMode ? basePlugins : [...basePlugins, ...electronPlugins],
 	};
 });
