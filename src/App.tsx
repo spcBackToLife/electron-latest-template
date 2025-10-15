@@ -1,4 +1,3 @@
-import '@/views/aiChat/components/CodeOfSemi';
 import { Suspense, useEffect } from 'react';
 
 import { Routers } from './Router';

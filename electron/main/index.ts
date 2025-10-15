@@ -5,9 +5,7 @@ import path, { join } from 'node:path';
 import { update } from './update';
 import './sqlite3';
 import './settings';
-import './venue';
 import './winManager';
-import './llmLogData';
 import { winManager } from './winManager';
 
 // The built directory structure
